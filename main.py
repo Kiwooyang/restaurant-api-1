@@ -1,9 +1,20 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+
 app = FastAPI()
+
+# CORS 허용 (테스트 용도, 전체 허용)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],      # 나중에 원하면 특정 도메인만 넣을 수 있음
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class Reservation(BaseModel):
