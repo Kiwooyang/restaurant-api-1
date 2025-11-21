@@ -4,6 +4,12 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
 
+import os
+import json
+import gspread
+from google.oauth2.service_account import Credentials
+
+
 
 app = FastAPI()
 
@@ -15,6 +21,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---- Google Sheet 설정 ----
+SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
+
+# Render 환경 변수에서 서비스키 불러오기
+service_account_info = json.loads(os.environ["GOOGLE_SERVICE_KEY"])
+
+creds = Credentials.from_service_account_info(
+    service_account_info,
+    scopes=SCOPES,
+)
+
+gc = gspread.authorize(creds)
+
+SPREADSHEET_NAME = "Restaurant_Reservations"  # 여기 시트 이름만 네 것으로 변경!
+sh = gc.open(SPREADSHEET_NAME)
+worksheet = sh.sheet1
 
 
 class Reservation(BaseModel):
@@ -33,7 +56,10 @@ def health_check():
 
 @app.post("/reservation/create")
 def create_reservation(res: Reservation):
-    # 일단 1단계: 서버 로그(콘솔)에만 찍기
+    # 생성 시간
+    created_at = datetime.now().isoformat()
+
+    # 1) 서버 로그 찍기
     print("---- New Reservation ----")
     print("Date      :", res.date)
     print("Time      :", res.time)
@@ -41,13 +67,24 @@ def create_reservation(res: Reservation):
     print("Name      :", res.name)
     print("Phone     :", res.phone)
     print("Notes     :", res.notes)
-    print("CreatedAt :", datetime.now().isoformat())
+    print("CreatedAt :", created_at)
     print("-------------------------")
 
-    # 나중에 여기다가 Google Sheet에 쓰는 로직을 추가할 거야.
+    # 2) Google Sheet에 한 줄 추가
+    row = [
+        res.date,
+        res.time,
+        res.party_size,
+        res.name,
+        res.phone,
+        res.notes or "",
+        created_at,
+    ]
+    worksheet.append_row(row, value_input_option="USER_ENTERED")
 
+    # 3) 클라이언트로 응답
     return {
         "status": "ok",
         "message": "reservation created",
-        "created_at": datetime.now().isoformat()
+        "created_at": created_at,
     }
