@@ -22,13 +22,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---- Google Sheet 설정 ----
+# ---- Google Sheet 설정 (단순/안정 버전) ----
+# 👇 스코프: 시트 API만 사용
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive.readonly",
 ]
 
-# Render 환경 변수에서 서비스 계정 키(JSON) 읽기
+# Render 환경 변수에서 서비스키 불러오기
 service_account_info = json.loads(os.environ["GOOGLE_SERVICE_KEY"])
 
 # 자격 증명 생성
@@ -40,13 +40,13 @@ creds = Credentials.from_service_account_info(
 # gspread 클라이언트 생성
 gc = gspread.authorize(creds)
 
-# ⚠️ 반드시 본인 스프레드시트 ID를 입력
+# ⚠️ 네 시트의 ID (이미 알려준 값)
 SPREADSHEET_ID = "1Mfl2gm4DNkwX_Ick8T5NLMKFXr6Nv0ShuerPwHsA-lE"
 
-# 스프레드시트 및 첫 번째 시트 열기
+# ID로 시트 열기 (Drive 검색 안 함)
 sh = gc.open_by_key(SPREADSHEET_ID)
 worksheet = sh.sheet1
-# --------------------------
+# -----------------------------------------
 
 
 # 예약 데이터 모델
