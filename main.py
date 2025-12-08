@@ -68,7 +68,11 @@ def health_check():
 # 예약 생성 엔드포인트
 @app.post("/reservation/create")
 def create_reservation(res: Reservation):
-    created_at = datetime.now().isoformat()
+    
+    # 한국 시간(KST, UTC+9) 적용
+    from datetime import datetime, timezone, timedelta
+    KST = timezone(timedelta(hours=9))
+    created_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
 
     # 1) 서버 로그 출력
     print("---- New Reservation ----")
