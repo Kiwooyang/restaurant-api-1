@@ -22,6 +22,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Health check (Render warm-up / demo 안정화용)
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
 # ---- Google Sheet 설정 (단순/안정 버전) ----
 # 👇 스코프: 시트 API만 사용
 SCOPES = [
