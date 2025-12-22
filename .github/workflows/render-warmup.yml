@@ -1,0 +1,18 @@
+name: Render Warmup
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # 15분마다
+  workflow_dispatch:        # 수동 실행 버튼
+
+jobs:
+  warmup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call health endpoint
+        run: |
+          set -e
+          echo "Calling /health..."
+          curl -sS -o /dev/null -w "HTTP %{http_code}\n" \
+            https://restaurant-api-1-2ssw.onrender.com/health
+
