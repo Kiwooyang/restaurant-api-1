@@ -6,6 +6,7 @@ from typing import Optional, Literal
 import gspread
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from google.oauth2.service_account import Credentials
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, timezone, timedelta
@@ -151,18 +152,22 @@ class ApiResponse(BaseModel):
 # =========================
 # Endpoints
 # =========================
-@app.get("/health", response_model=ApiResponse)
+@app.api_route("/health", methods=["GET", "HEAD"], response_class=PlainTextResponse)
 def health():
-    # Sheets가 초기화되었는지까지 같이 체크
+    # 아주 가볍게: 모니터링/워밍업 전용
+    return "OK"
+
+
+@app.api_route("/", methods=["GET", "HEAD"], response_class=PlainTextResponse)
+def root():
+    return "OK"
+
+
+@app.get("/health/sheets", response_model=ApiResponse)
+def health_sheets():
     if worksheet is None:
         return ApiResponse(status="error", message="google sheet not initialized")
-    return ApiResponse(status="ok", message="alive")
-
-
-@app.get("/", response_model=ApiResponse)
-def root():
-    # 기존 "/" health_check와 중복이어서 명확히 분리
-    return ApiResponse(status="ok", message="restaurant api alive")
+    return ApiResponse(status="ok", message=f"sheets ok: {worksheet.title}")
 
 
 @app.post("/reservation/create", response_model=ApiResponse)
