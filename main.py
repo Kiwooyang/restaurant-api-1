@@ -10,6 +10,10 @@ from fastapi.responses import PlainTextResponse
 from google.oauth2.service_account import Credentials
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, timezone, timedelta
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+
 
 # =========================
 # Logging
@@ -27,6 +31,23 @@ KST = timezone(timedelta(hours=9))
 # FastAPI App
 # =========================
 app = FastAPI(title="Restaurant Reservation API", version="1.0.0")
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    try:
+        raw = await request.body()
+        body_text = raw.decode("utf-8", errors="replace")
+    except Exception:
+        body_text = "<unreadable body>"
+
+    logger.warning(
+        "422 ValidationError path=%s errors=%s body=%s",
+        request.url.path,
+        exc.errors(),
+        body_text,
+    )
+
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 # =========================
 # CORS (환경변수로 제어)
