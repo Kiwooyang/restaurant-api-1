@@ -38,34 +38,45 @@ app = FastAPI(title="Restaurant Reservation API", version="1.0.0")
 # =========================
 @app.middleware("http")
 async def capture_raw_body(request: Request, call_next):
-    # reservation create 요청만 캡처 (로그 과다 방지)
     if request.url.path == "/reservation/create" and request.method == "POST":
         body = await request.body()
-        request.state.raw_body = body  # 원문 저장
+        request.state.raw_body = body
 
-        # downstream(validator)가 다시 body를 읽을 수 있도록 스트림 복원
         async def receive():
             return {"type": "http.request", "body": body, "more_body": False}
 
-        request._receive = receive  # Starlette internal (works in practice)
+        request._receive = receive
 
     return await call_next(request)
+
+
+def _json_safe_errors(errors):
+    safe = []
+    for e in errors:
+        e2 = dict(e)
+        ctx = e2.get("ctx")
+        if isinstance(ctx, dict):
+            ctx2 = dict(ctx)
+            if "error" in ctx2:
+                ctx2["error"] = str(ctx2["error"])
+            e2["ctx"] = ctx2
+        safe.append(e2)
+    return safe
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     raw = getattr(request.state, "raw_body", b"")
     raw_text = raw.decode("utf-8", errors="replace")
+    errs = _json_safe_errors(exc.errors())
 
     logger.warning(
         "422 ValidationError path=%s errors=%s raw_body=%s",
         request.url.path,
-        exc.errors(),
+        errs,
         raw_text,
     )
-
-    return JSONResponse(status_code=422, content={"detail": exc.errors()})
-
+    return JSONResponse(status_code=422, content={"detail": errs})
 
 # =========================
 # CORS (환경변수로 제어)
