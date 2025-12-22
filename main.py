@@ -34,17 +34,14 @@ app = FastAPI(title="Restaurant Reservation API", version="1.0.0")
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    try:
-        raw = await request.body()
-        body_text = raw.decode("utf-8", errors="replace")
-    except Exception:
-        body_text = "<unreadable body>"
+    raw = await request.body()
+    raw_text = raw.decode("utf-8", errors="replace")
 
     logger.warning(
-        "422 ValidationError path=%s errors=%s body=%s",
+        "422 ValidationError path=%s errors=%s raw_body=%s",
         request.url.path,
         exc.errors(),
-        body_text,
+        raw_text,
     )
 
     return JSONResponse(status_code=422, content={"detail": exc.errors()})
