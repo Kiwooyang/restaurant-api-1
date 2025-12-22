@@ -11,8 +11,9 @@ from google.oauth2.service_account import Credentials
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime, timezone, timedelta
 from fastapi import Request
-from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
 
 
 # =========================
@@ -32,9 +33,28 @@ KST = timezone(timedelta(hours=9))
 # =========================
 app = FastAPI(title="Restaurant Reservation API", version="1.0.0")
 
+# =========================
+# Raw body capture (for 422 debug)
+# =========================
+@app.middleware("http")
+async def capture_raw_body(request: Request, call_next):
+    # reservation create 요청만 캡처 (로그 과다 방지)
+    if request.url.path == "/reservation/create" and request.method == "POST":
+        body = await request.body()
+        request.state.raw_body = body  # 원문 저장
+
+        # downstream(validator)가 다시 body를 읽을 수 있도록 스트림 복원
+        async def receive():
+            return {"type": "http.request", "body": body, "more_body": False}
+
+        request._receive = receive  # Starlette internal (works in practice)
+
+    return await call_next(request)
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    raw = await request.body()
+    raw = getattr(request.state, "raw_body", b"")
     raw_text = raw.decode("utf-8", errors="replace")
 
     logger.warning(
@@ -45,6 +65,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     )
 
     return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
 
 # =========================
 # CORS (환경변수로 제어)
