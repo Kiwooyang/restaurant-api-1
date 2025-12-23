@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import re
 from typing import Optional, Literal
 
 import gspread
@@ -148,6 +149,16 @@ def _parse_created_at(v: str) -> datetime:
     except Exception:
         return datetime(1970, 1, 1, tzinfo=KST)
 
+def _norm_phone(v: str) -> str:
+    return re.sub(r"\D", "", (v or "").strip())
+
+def _header_map() -> dict:
+    """
+    1행 헤더를 읽어 컬럼명 -> 1-based index로 매핑
+    """
+    header = worksheet.row_values(1)
+    return {h.strip(): i + 1 for i, h in enumerate(header) if h and h.strip()}
+
 # =========================
 # Models
 # =========================
@@ -258,16 +269,22 @@ def cancel_reservation(req: CancelRequest):
     if worksheet is None:
         raise HTTPException(status_code=500, detail="Google Sheet not initialized")
 
-    # 컬럼 인덱스(1-based for gspread update_cell)
-    # 1 date, 2 time, 3 party_size, 4 name, 5 phone, 6 notes, 7 created_at, 8 status, 9 cancelled_at
-    COL_DATE = 1
-    COL_TIME = 2
-    COL_NAME = 4
-    COL_PHONE = 5
-    COL_CREATED_AT = 7
-    COL_STATUS = 8
-    COL_CANCELLED_AT = 9
+    # 헤더 기반 컬럼 인덱스 로드 (1-based)
+    h = _header_map()
+    required_cols = ["date", "time", "name", "phone", "created_at", "status", "cancelled_at"]
+    for c in required_cols:
+        if c not in h:
+            raise HTTPException(status_code=500, detail=f"Missing column in sheet: {c}")
 
+    col_date = h["date"]
+    col_time = h["time"]
+    col_name = h["name"]
+    col_phone = h["phone"]
+    col_created_at = h["created_at"]
+    col_status = h["status"]
+    col_cancelled_at = h["cancelled_at"]
+
+    # 시트 전체 로드
     try:
         values = worksheet.get_all_values()
     except Exception as e:
@@ -280,47 +297,77 @@ def cancel_reservation(req: CancelRequest):
     header = values[0]
     rows = values[1:]  # data only
 
-    # 후보 찾기: phone+date+time 일치, status=CONFIRMED, (선택) name 일치
+    date_q = req.date.strip()
+    time_q = req.time.strip()
+    phone_q = _norm_phone(req.phone)
+    name_q = (req.name or "").strip()
+
+    # 1차 후보: date+time+phone 일치 & status=CONFIRMED
     candidates = []
-    for idx0, r in enumerate(rows, start=2):  # 실제 sheet row index (header=1)
-        # 안전하게 길이 보정
-        r = r + [""] * (len(header) - len(r))
+    for row_idx, r in enumerate(rows, start=2):  # 실제 sheet row index
+        # 행 길이 보정(짧은 row 방지)
+        r = r + [""] * max(0, len(header) - len(r))
 
-        date_v = r[COL_DATE - 1].strip()
-        time_v = r[COL_TIME - 1].strip()
-        name_v = r[COL_NAME - 1].strip()
-        phone_v = r[COL_PHONE - 1].strip()
-        created_at_v = r[COL_CREATED_AT - 1].strip()
-        status_v = r[COL_STATUS - 1].strip().upper()
+        date_v = (r[col_date - 1] if col_date - 1 < len(r) else "").strip()
+        time_v = (r[col_time - 1] if col_time - 1 < len(r) else "").strip()
+        name_v = (r[col_name - 1] if col_name - 1 < len(r) else "").strip()
+        phone_v = (r[col_phone - 1] if col_phone - 1 < len(r) else "").strip()
+        created_at_v = (r[col_created_at - 1] if col_created_at - 1 < len(r) else "").strip()
+        status_v = (r[col_status - 1] if col_status - 1 < len(r) else "").strip().upper()
 
-        if date_v != req.date:
-            continue
-        if time_v != req.time:
-            continue
-        if phone_v != req.phone:
-            continue
-        if req.name and req.name.strip() and name_v != req.name.strip():
-            continue
         if status_v != "CONFIRMED":
             continue
+        if date_v != date_q:
+            continue
+        if time_v != time_q:
+            continue
+        if _norm_phone(phone_v) != phone_q:
+            continue
 
-        candidates.append((idx0, _parse_created_at(created_at_v), created_at_v))
+        candidates.append({
+            "row": row_idx,
+            "name": name_v,
+            "created_at_str": created_at_v,
+            "created_at": _parse_created_at(created_at_v),
+        })
 
     if not candidates:
         return ApiResponse(status="error", message="matching CONFIRMED reservation not found")
 
-    # 가장 최근 created_at인 1건만 취소 (중복 방지)
-    candidates.sort(key=lambda x: x[1], reverse=True)
-    target_row, _, target_created_at = candidates[0]
+    # 후보가 1건이면 바로 취소
+    if len(candidates) == 1:
+        target = candidates[0]
+    else:
+        # 후보가 여러 건이면 name으로 2차 필터
+        if not name_q:
+            return ApiResponse(status="error", message="multiple matches found; name required")
+
+        narrowed = [c for c in candidates if c["name"] == name_q]
+
+        if not narrowed:
+            return ApiResponse(status="error", message="multiple matches found; name mismatch")
+
+        # 2차도 여러 건이면 created_at 최신 1건 취소(데모 정책)
+        narrowed.sort(key=lambda x: x["created_at"], reverse=True)
+        target = narrowed[0]
 
     cancelled_at = _now_kst_str()
 
     try:
-        worksheet.update_cell(target_row, COL_STATUS, "CANCELLED")
-        worksheet.update_cell(target_row, COL_CANCELLED_AT, cancelled_at)
+        worksheet.update_cell(target["row"], col_status, "CANCELLED")
+        worksheet.update_cell(target["row"], col_cancelled_at, cancelled_at)
     except Exception as e:
         logger.exception("Failed to update Google Sheet for cancel")
         raise HTTPException(status_code=502, detail="Failed to update Google Sheet") from e
 
-    logger.info("Cancelled reservation row=%s phone=%s date=%s time=%s", target_row, req.phone, req.date, req.time)
-    return ApiResponse(status="ok", message="reservation cancelled", created_at=target_created_at, cancelled_at=cancelled_at)
+    logger.info(
+        "Cancelled reservation row=%s phone=%s date=%s time=%s",
+        target["row"], req.phone, req.date, req.time
+    )
+
+    return ApiResponse(
+        status="ok",
+        message="reservation cancelled",
+        created_at=target["created_at_str"] or None,
+        cancelled_at=cancelled_at,
+    )
